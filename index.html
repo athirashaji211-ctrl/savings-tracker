@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Savings Tracker</title>
+<meta name="theme-color" content="#3b6d11" />
+<link rel="manifest" href="manifest.json" />
+<link rel="icon" href="icon.png" />
+<link rel="apple-touch-icon" href="icon.png" />
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    background: #f5f4f0;
+    color: #2c2c2a;
+    margin: 0;
+    padding: 16px;
+    max-width: 480px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  h1 {
+    font-size: 20px;
+    font-weight: 600;
+    margin: 8px 0 16px;
+  }
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+  label { font-size: 14px; color: #5f5e5a; }
+  input[type="number"] {
+    width: 130px;
+    height: 36px;
+    padding: 0 10px;
+    border-radius: 8px;
+    border: 1px solid #d3d1c7;
+    font-size: 14px;
+  }
+  button {
+    height: 36px;
+    padding: 0 12px;
+    border-radius: 8px;
+    border: 1px solid #b4b2a9;
+    background: #fff;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  button:active { transform: scale(0.98); }
+  .card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 12px;
+  }
+  .card p.label { font-size: 13px; color: #5f5e5a; margin: 0 0 4px; }
+  .card p.value { font-size: 24px; font-weight: 600; margin: 0; }
+  .bar-track {
+    height: 8px;
+    background: #e5e3da;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 20px;
+  }
+  .bar-fill {
+    height: 100%;
+    width: 0%;
+    background: #3b6d11;
+    transition: width 0.3s;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(54px, 1fr));
+    gap: 6px;
+    background: #efeee8;
+    padding: 14px;
+    border-radius: 12px;
+  }
+  .cell {
+    text-align: center;
+    padding: 10px 4px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+    border: 1px solid #d3d1c7;
+    background: #fff;
+    color: #5f5e5a;
+  }
+  .cell.marked {
+    background: #eaf3de;
+    color: #27500a;
+    border-color: #c0dd97;
+    text-decoration: line-through;
+  }
+  .note {
+    font-size: 12px;
+    color: #888780;
+    margin-top: 16px;
+    line-height: 1.5;
+  }
+  #installBtn {
+    display: none;
+    margin-bottom: 16px;
+    background: #3b6d11;
+    color: #fff;
+    border: none;
+  }
+</style>
+</head>
+<body>
+
+<h1>Savings tracker</h1>
+
+<button id="installBtn">Install app</button>
+
+<div class="controls">
+  <label for="goalInput">Goal</label>
+  <input type="number" id="goalInput" value="100000" step="500" />
+  <button id="newGridBtn">New grid</button>
+  <button id="resetBtn">Reset marks</button>
+</div>
+
+<div class="card">
+  <p class="label">Saved</p>
+  <p class="value" id="savedOut">₹0</p>
+</div>
+
+<div class="bar-track">
+  <div class="bar-fill" id="progressBar"></div>
+</div>
+
+<div class="grid" id="grid"></div>
+
+<p class="note">Your progress saves automatically on this device. Install this as an app from your browser menu (or tap "Install app" above if it shows) for one-tap access.</p>
+
+<script>
+const STORAGE_KEY = 'savings-grid-state';
+let state = null;
+
+function denomsFor(target) {
+  let remaining = target;
+  let cells = [];
+  while (remaining > 0) {
+    let pick;
+    if (remaining >= 500 && Math.random() < 0.55) pick = 500;
+    else if (remaining >= 200 && Math.random() < 0.6) pick = 200;
+    else pick = 100;
+    if (pick > remaining) pick = remaining >= 200 ? 200 : (remaining >= 100 ? 100 : remaining);
+    cells.push(pick);
+    remaining -= pick;
+  }
+  for (let i = cells.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [cells[i], cells[j]] = [cells[j], cells[i]];
+  }
+  return cells;
+}
+
+function newState(goal) {
+  const amounts = denomsFor(goal);
+  return { goal, amounts, clicked: amounts.map(() => false) };
+}
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  return null;
+}
+
+function saveState() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (e) {}
+}
+
+function render() {
+  const grid = document.getElementById('grid');
+  grid.innerHTML = '';
+  state.amounts.forEach((amt, i) => {
+    const cell = document.createElement('div');
+    const marked = state.clicked[i];
+    cell.textContent = amt;
+    cell.className = 'cell' + (marked ? ' marked' : '');
+    cell.addEventListener('click', () => toggle(i));
+    grid.appendChild(cell);
+  });
+  updateSummary();
+}
+
+function updateSummary() {
+  const saved = state.amounts.reduce((sum, amt, i) => sum + (state.clicked[i] ? amt : 0), 0);
+  document.getElementById('savedOut').textContent = '₹' + saved.toLocaleString('en-IN');
+  const pct = Math.min(100, Math.round((saved / state.goal) * 100));
+  document.getElementById('progressBar').style.width = pct + '%';
+}
+
+function toggle(i) {
+  state.clicked[i] = !state.clicked[i];
+  render();
+  saveState();
+}
+
+document.getElementById('newGridBtn').addEventListener('click', () => {
+  const goal = Math.max(100, parseInt(document.getElementById('goalInput').value) || 100000);
+  state = newState(goal);
+  render();
+  saveState();
+});
+
+document.getElementById('resetBtn').addEventListener('click', () => {
+  state.clicked = state.amounts.map(() => false);
+  render();
+  saveState();
+});
+
+(function init() {
+  const loaded = loadState();
+  if (loaded && loaded.amounts && loaded.amounts.length === loaded.clicked.length) {
+    state = loaded;
+    document.getElementById('goalInput').value = state.goal;
+  } else {
+    state = newState(100000);
+    saveState();
+  }
+  render();
+})();
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+
+let deferredPrompt;
+const installBtn = document.getElementById('installBtn');
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  installBtn.style.display = 'inline-block';
+});
+installBtn.addEventListener('click', async () => {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  await deferredPrompt.userChoice;
+  deferredPrompt = null;
+  installBtn.style.display = 'none';
+});
+</script>
+
+</body>
+</html>
